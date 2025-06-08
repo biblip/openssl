@@ -1,0 +1,96 @@
+name: Build OpenSSL CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'OpenSSL tag to build (e.g. openssl-3.5.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Checkout specified tag
+        run: |
+          git remote add upstream https://github.com/openssl/openssl.git || echo "Upstream already exists"
+          git fetch --tags upstream
+          git checkout ${{ inputs.tag }}
+
+      # Linux
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y build-essential perl nasm
+
+      # Windows
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install -y strawberryperl visualstudio2022buildtools --force
+
+      - name: Setup NASM
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Setup MSVC DevCmd
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # macOS
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install perl
+
+      # Build Linux
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          perl Configure linux-x86_64 --prefix=$PWD/openssl-cli --openssldir=$PWD/openssl-cli/ssl
+          make -j$(nproc)
+          make install_sw
+
+      # Build Windows
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          perl Configure VC-WIN64A --prefix=${{ github.workspace }}\openssl-cli --openssldir=${{ github.workspace }}\openssl-cli\ssl
+          nmake
+          nmake install_sw
+
+      # Build macOS
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          perl Configure darwin64-x86_64-cc --prefix=$PWD/openssl-cli --openssldir=$PWD/openssl-cli/ssl
+          make -j$(sysctl -n hw.ncpu)
+          make install_sw
+
+      # Upload artifacts
+      - name: Upload openssl CLI executable (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-cli-${{ inputs.tag }}-linux
+          path: openssl-cli/bin/openssl
+
+      - name: Upload openssl CLI executable (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-cli-${{ inputs.tag }}-windows
+          path: openssl-cli\bin\openssl.exe
+
+      - name: Upload openssl CLI executable (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-cli-${{ inputs.tag }}-macos
+          path: openssl-cli/bin/openssl
